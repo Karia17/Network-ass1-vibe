@@ -69,7 +69,7 @@ class HttpAdapter:
         "raw_socket",
     ]
 
-    def __init__(self, ip, port, conn, connaddr, routes):
+    def __init__(self, ip=None, port=None, conn=None, connaddr=None, routes=None):
         """
         Initialize a new HttpAdapter instance.
 
@@ -130,6 +130,9 @@ class HttpAdapter:
         response = b""
         try:
             if req.hook:
+                #
+                # TODO: handle for App hook here
+                #
                 hook_res = req.hook(req.headers, req.body)
                 if inspect.iscoroutine(hook_res):
                     hook_res = asyncio.run(hook_res)
@@ -191,6 +194,9 @@ class HttpAdapter:
         
         # Handle request hook
         if req.hook:
+            #
+            # TODO: handle for App hook here
+            #
             try:
                 hook_res = req.hook(req.headers, req.body)
                 if inspect.iscoroutine(hook_res):
@@ -220,15 +226,19 @@ class HttpAdapter:
         # Send response using streaprous raw connection
         response = response if isinstance(response, bytes) else response.encode("utf-8")
         print(f"[HttpAdapter] HTTP Response ({len(response)} bytes): {response[:200]}")
-        
-        # Send packet with reliability and flow control
+        #
+        # TODO run_conn_send packet
+        # run_conn_send(..)
         run_conn_send(raw_socket, conn_info, response)
         
-        # Wait a short moment to ensure all packets/ACKs are cleanly settled
+        # Wait longer to ensure response is transmitted, client processes it, and sends ACK
         import time
         time.sleep(0.5)
         
         # Close connection with FIN packet
+        #
+        # TODO run_conn_send packet
+        # close_connection(...)
         close_connection(raw_socket, conn_info)
 
     async def handle_client_coroutine(self, reader, writer):
@@ -248,17 +258,19 @@ class HttpAdapter:
         # Response handler
         resp = self.response
 
-        print("[HttpAdapter] Invoke handle_client_coroutine connection {})".format(addr))
         addr = writer.get_extra_info("peername")
+        print("[HttpAdapter] Invoke handle_client_coroutine connection {})".format(addr))
 
         # TODO Handle the request asynchronously
         msg = await reader.read(1024)
-
 
         req.prepare(msg.decode("utf-8"), routes={})
 
         # Handle request hook
         if req.hook:
+            #
+            # TODO: handle for App hook here
+            #
             try:
                 hook_res = req.hook(req.headers, req.body)
                 if inspect.iscoroutine(hook_res):
@@ -282,6 +294,8 @@ class HttpAdapter:
                 print(f"[HttpAdapter] Error executing async hook: {e}")
                 response = b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n"
         else:
+            # Build response
+            #print("[HttpAdapter] Start **ASYNC** build_response with type {}".format(type(req)))
             response = resp.build_response(req)
 
         # Send all the response asynchronously

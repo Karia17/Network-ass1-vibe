@@ -42,8 +42,7 @@ from .streaprous_packet_dispatcher import (
 )
 
 # Import transport modules (CUBIC, Flow Control, Reliability)
-try:
-    from .constants import (
+from .constant import (
         MSS,
         SND_WIN_SIZE,
         RCV_WIN_SIZE,
@@ -55,23 +54,8 @@ try:
         ACTION_OUT_OF_WINDOW,
         ACTION_BUFFER_FULL,
     )
-    from .cubic import CubicCongestionControl
-    from .flow_buffer import SendBufferManager, ReceiveBufferManager
-except ImportError:
-    from constants import (
-        MSS,
-        SND_WIN_SIZE,
-        RCV_WIN_SIZE,
-        INIT_CWND,
-        INITIAL_RTO,
-        WIN_UPDATE_INTERVAL,
-        ACTION_ACCEPT,
-        ACTION_DUPLICATE,
-        ACTION_OUT_OF_WINDOW,
-        ACTION_BUFFER_FULL,
-    )
-    from cubic import CubicCongestionControl
-    from flow_buffer import SendBufferManager, ReceiveBufferManager
+from .cubic import CubicCongestionControl
+from .flow_buffer import SendBufferManager, ReceiveBufferManager
 
 
 # Connection structure 
@@ -284,7 +268,9 @@ def send_tcp_data_segment(s, src_ip, dest_ip, src_port, dst_port, seq, ack_seq, 
          window       Advertised window size (rwnd)
     """
 
-    # PSH + ACK
+    # TODO: Hardcode for fast data pushing
+    #       The setting PSH + ACK
+    #       need to modify in full schema
     flags = 0x18
     offset_res = (5 << 4) + 0
     if window is None:
@@ -381,22 +367,23 @@ def get_interface_ip(interface_name: str = None) -> str:
     Returns:
         IPv4 address string
     """
-    try:
-        if interface_name:
-            addrs = netifaces.ifaddresses(interface_name)
-            if netifaces.AF_INET in addrs:
-                return addrs[netifaces.AF_INET][0]['addr']
-        else:
-            # Try to get default route interface
-            gateways = netifaces.gateways()
-            default_gateway = gateways.get('default', {}).get(netifaces.AF_INET)
-            if default_gateway:
-                iface = default_gateway[1]
-                addrs = netifaces.ifaddresses(iface)
+    if netifaces is not None:
+        try:
+            if interface_name:
+                addrs = netifaces.ifaddresses(interface_name)
                 if netifaces.AF_INET in addrs:
                     return addrs[netifaces.AF_INET][0]['addr']
-    except Exception:
-        pass
+            else:
+                # Try to get default route interface
+                gateways = netifaces.gateways()
+                default_gateway = gateways.get('default', {}).get(netifaces.AF_INET)
+                if default_gateway:
+                    iface = default_gateway[1]
+                    addrs = netifaces.ifaddresses(iface)
+                    if netifaces.AF_INET in addrs:
+                        return addrs[netifaces.AF_INET][0]['addr']
+        except Exception:
+            pass
     
     # Fallback: try to get any non-loopback IP
     try:
@@ -407,6 +394,25 @@ def get_interface_ip(interface_name: str = None) -> str:
         return ip
     except Exception:
         return "127.0.0.1"
+
+
+def _create_established_session(session, client_ip, client_port, server_ip, server_port, pkt_seq, pkt_ack):
+    """Helper to initialize an ESTABLISHED conn_struct with its transport managers."""
+    return conn_struct(
+        client_ip=client_ip,
+        client_port=client_port,
+        server_ip=server_ip,
+        server_port=server_port,
+        state="ESTABLISHED",
+        server_seq=pkt_ack,
+        client_seq=pkt_seq,
+        expected_final_ack=session.expected_final_ack,
+        last_activity=time.time(),
+        cubic=CubicCongestionControl(),
+        send_mgr=SendBufferManager(initial_seq=pkt_ack),
+        recv_mgr=ReceiveBufferManager(initial_seq=pkt_seq),
+        lock=threading.Lock(),
+    )
 
 
 def accept(s: socket.socket, listen_ip: str, listen_port: int, interface_name: str = None) -> conn_struct:
@@ -583,21 +589,9 @@ def accept(s: socket.socket, listen_ip: str, listen_port: int, interface_name: s
                                 print(f"[Streap_raw] accept: Non handshake state for {client_ip}:{client_port}")
                                 break
 
-                            # Update connection to ESTABLISHED with transport managers
-                            connections[client_key] = conn_struct(
-                                client_ip=client_ip,
-                                client_port=client_port,
-                                server_ip=send_ip,
-                                server_port=listen_port,
-                                state="ESTABLISHED",
-                                server_seq=pkt_ack,
-                                client_seq=pkt_seq,
-                                expected_final_ack=session.expected_final_ack,
-                                last_activity=time.time(),
-                                cubic=CubicCongestionControl(),
-                                send_mgr=SendBufferManager(initial_seq=pkt_ack),
-                                recv_mgr=ReceiveBufferManager(initial_seq=pkt_seq),
-                                lock=threading.Lock(),
+                            # Update connection to ESTABLISHED
+                            connections[client_key] = _create_established_session(
+                                session, client_ip, client_port, send_ip, listen_port, pkt_seq, pkt_ack
                             )
                             session = connections[client_key]
 
@@ -629,21 +623,9 @@ def accept(s: socket.socket, listen_ip: str, listen_port: int, interface_name: s
                         print(f"[Streap_raw] accept: Non handshake state for {client_ip}:{client_port}")
                         continue
 
-                    # Update connection to ESTABLISHED with transport managers
-                    connections[client_key] = conn_struct(
-                        client_ip=client_ip,
-                        client_port=client_port,
-                        server_ip=send_ip,
-                        server_port=listen_port,
-                        state="ESTABLISHED",
-                        server_seq=pkt_ack,
-                        client_seq=pkt_seq,
-                        expected_final_ack=session.expected_final_ack,
-                        last_activity=time.time(),
-                        cubic=CubicCongestionControl(),
-                        send_mgr=SendBufferManager(initial_seq=pkt_ack),
-                        recv_mgr=ReceiveBufferManager(initial_seq=pkt_seq),
-                        lock=threading.Lock(),
+                    # Update connection to ESTABLISHED
+                    connections[client_key] = _create_established_session(
+                        session, client_ip, client_port, send_ip, listen_port, pkt_seq, pkt_ack
                     )
                     session = connections[client_key]
 
@@ -745,7 +727,7 @@ def run_conn_recv(s: socket.socket, conn_info: conn_struct) -> bytes:
                 print(f"[Streap_raw] Received FIN from {client_ip}:{client_port}")
                 # Send ACK for FIN
                 next_ack = pkt_seq + 1
-                rwnd_bytes = session.recv_mgr.get_rwnd() * MSS if session.recv_mgr else (RCV_WIN_SIZE * MSS)
+                rwnd_bytes = session.recv_mgr.get_advertised_rwnd() if session.recv_mgr else (RCV_WIN_SIZE * MSS)
                 ack_packet = build_tcp_packet(listen_ip, client_ip, listen_port, client_port,
                                               seq=session.server_seq, ack_seq=next_ack, ack=1, window=rwnd_bytes)
                 ip_header = build_ip_header(listen_ip, client_ip, socket.IPPROTO_TCP, len(ack_packet))
@@ -777,25 +759,27 @@ def run_conn_recv(s: socket.socket, conn_info: conn_struct) -> bytes:
             # Handle ACK if present (feed into send_mgr and CUBIC)
             if ack_flag and not syn_flag:
                 if session.send_mgr:
-                    rcv_rwnd_pkts = max(1, pkt_window // MSS)
-                    is_new_ack, loss_seq = session.send_mgr.on_ack_received(pkt_ack, rcv_rwnd=rcv_rwnd_pkts)
+                    is_new_ack, loss_seq = session.send_mgr.on_ack_received(pkt_ack, rcv_rwnd=pkt_window)
                     if is_new_ack and session.cubic:
-                        session.cubic.on_ack(1)
+                        session.cubic.on_ack(1, ack_seq=pkt_ack)
                     if loss_seq is not None and session.cubic:
                         session.cubic.on_loss(session.send_mgr.seq_to_send)
                         if loss_seq in session.send_mgr.send_buffer:
                             retrans_payload = session.send_mgr.send_buffer[loss_seq]['payload']
-                            rwnd_bytes = session.recv_mgr.get_rwnd() * MSS if session.recv_mgr else (RCV_WIN_SIZE * MSS)
+                            rwnd_bytes = session.recv_mgr.get_advertised_rwnd() if session.recv_mgr else (RCV_WIN_SIZE * MSS)
                             ack_num = session.recv_mgr.get_next_ack() if session.recv_mgr else session.client_seq
                             send_tcp_data_segment(s, listen_ip, client_ip, listen_port, client_port,
                                                   seq=loss_seq, ack_seq=ack_num, payload=retrans_payload, window=rwnd_bytes)
+                            session.send_mgr.mark_retransmission_sent(loss_seq)
 
-            # Handle data payload
+            # Handle data payload (PSH + ACK) or (ACK with data) - Fast path ACK
+            # Some clients may not set PSH flag for small requests
             tcp_header_len = ((tcp_packet[12] >> 4) & 0x0F) * 4
             app_payload = tcp_packet[tcp_header_len:]
             has_data = len(app_payload) > 0
             
             if has_data and not syn_flag and not fin_flag and not rst_flag:
+                # Dynamically look up header length to bypass any incoming TCP Options
                 print(f"[Streap_raw] Received {len(app_payload)} bytes of data from {client_ip}:{client_port}")
                 
                 if session.recv_mgr is not None:
@@ -804,7 +788,7 @@ def run_conn_recv(s: socket.socket, conn_info: conn_struct) -> bytes:
                     print(f"[Streap_raw] recv_mgr on_packet_arrived: action={action}, rwnd={curr_rwnd}")
                     
                     next_ack = session.recv_mgr.get_next_ack()
-                    rwnd_bytes = session.recv_mgr.get_rwnd() * MSS
+                    rwnd_bytes = session.recv_mgr.get_advertised_rwnd()
                     
                     # Always transmit ACK packet back
                     ack_packet = build_tcp_packet(session.server_ip, client_ip, listen_port, client_port,
@@ -845,13 +829,14 @@ def run_conn_recv(s: socket.socket, conn_info: conn_struct) -> bytes:
                                 # Standard GET/HEAD/DELETE request without body
                                 return collected_payload
                 else:
-                    # Fallback fast path ACK
+                    # Send ACK for received data IMMEDIATELY (fast path)
                     next_ack = pkt_seq + len(app_payload)
                     ack_packet = build_tcp_packet(session.server_ip, client_ip, listen_port, client_port,
                                                   seq=session.server_seq, ack_seq=next_ack, ack=1)
                     ip_header = build_ip_header(session.server_ip, client_ip, socket.IPPROTO_TCP, len(ack_packet))
                     s.sendto(ip_header + ack_packet, (client_ip, 0))
                     print(f"[Streap_raw] Sent ACK for data (Ack={next_ack})")
+                    # Update sequence numbers AFTER ACK sent
                     with connections_lock:
                         if client_key in connections:
                             connections[client_key] = session._replace(
@@ -859,6 +844,7 @@ def run_conn_recv(s: socket.socket, conn_info: conn_struct) -> bytes:
                                 client_seq=next_ack,
                                 last_activity=time.time()
                             )
+                    # Return the received payload
                     return app_payload
 
             # Handle pure ACK (no data)
@@ -945,21 +931,24 @@ def run_conn_send(s: socket.socket, conn_info: conn_struct, payload: bytes) -> i
                     print(f"[Streap_raw] run_conn_send: Aborting send to {client_ip}:{client_port} due to timeout (no progress for {max_idle_timeout}s)")
                     break
 
-                # 2. Transmission Gate: Send as many packets as permitted by min(cwnd, rwnd, buffer_limit)
+                # 2. Transmission Gate: Convert CUBIC cwnd (packets) to bytes for send_mgr
                 packets_sent_in_batch = 0
-                while session.send_mgr.can_send(session.cubic.get_cwnd()):
+                cwnd_bytes = session.cubic.get_cwnd() * MSS
+                while session.send_mgr.can_send(cwnd_bytes):
                     pkt = session.send_mgr.get_next_packet_to_send()
                     if pkt is None:
                         break
                     pkt_seq, pkt_data = pkt
                     
-                    rwnd_bytes = session.recv_mgr.get_rwnd() * MSS if session.recv_mgr else (RCV_WIN_SIZE * MSS)
+                    rwnd_bytes = session.recv_mgr.get_advertised_rwnd() if session.recv_mgr else (RCV_WIN_SIZE * MSS)
                     current_ack = session.recv_mgr.get_next_ack() if session.recv_mgr else session.client_seq
 
                     send_tcp_data_segment(
                         s, listen_ip, client_ip, listen_port, client_port,
                         seq=pkt_seq, ack_seq=current_ack, payload=pkt_data, window=rwnd_bytes
                     )
+                    # Advance send queue and record InFlight & timers
+                    session.send_mgr.mark_packet_sent(pkt_seq)
                     packets_sent_in_batch += 1
 
                 if packets_sent_in_batch > 0:
@@ -1002,17 +991,16 @@ def run_conn_send(s: socket.socket, conn_info: conn_struct, payload: bytes) -> i
                             if fin_flag:
                                 print(f"[Streap_raw] run_conn_send: Received FIN from {client_ip}:{client_port}")
                                 # ACK client's FIN
-                                rwnd_bytes = session.recv_mgr.get_rwnd() * MSS if session.recv_mgr else (RCV_WIN_SIZE * MSS)
+                                rwnd_bytes = session.recv_mgr.get_advertised_rwnd() if session.recv_mgr else (RCV_WIN_SIZE * MSS)
                                 ack_pkt = build_tcp_packet(listen_ip, client_ip, listen_port, client_port,
                                                            seq=session.send_mgr.seq_to_send, ack_seq=pkt_seq + 1, ack=1, window=rwnd_bytes)
                                 ip_hdr = build_ip_header(listen_ip, client_ip, socket.IPPROTO_TCP, len(ack_pkt))
                                 s.sendto(ip_hdr + ack_pkt, (client_ip, 0))
                                 break
 
-                            # Process ACK
+                            # Process ACK (pass pkt_win in bytes directly)
                             if ack_flag and not syn_flag:
-                                rcv_rwnd_pkts = max(1, pkt_win // MSS)
-                                is_new_ack, loss_seq = session.send_mgr.on_ack_received(pkt_ack, rcv_rwnd=rcv_rwnd_pkts)
+                                is_new_ack, loss_seq = session.send_mgr.on_ack_received(pkt_ack, rcv_rwnd=pkt_win)
                                 
                                 if is_new_ack:
                                     session.cubic.on_ack(1, ack_seq=pkt_ack)
@@ -1030,14 +1018,13 @@ def run_conn_send(s: socket.socket, conn_info: conn_struct, payload: bytes) -> i
                                     print(f"[Streap_raw] run_conn_send: Fast Retransmit triggering for seq={loss_seq}")
                                     session.cubic.on_loss(session.send_mgr.seq_to_send)
                                     retrans_payload = session.send_mgr.send_buffer[loss_seq]['payload']
-                                    rwnd_bytes = session.recv_mgr.get_rwnd() * MSS if session.recv_mgr else (RCV_WIN_SIZE * MSS)
+                                    rwnd_bytes = session.recv_mgr.get_advertised_rwnd() if session.recv_mgr else (RCV_WIN_SIZE * MSS)
                                     current_ack = session.recv_mgr.get_next_ack() if session.recv_mgr else session.client_seq
                                     send_tcp_data_segment(
                                         s, listen_ip, client_ip, listen_port, client_port,
                                         seq=loss_seq, ack_seq=current_ack, payload=retrans_payload, window=rwnd_bytes
                                     )
-                                    if loss_seq in session.send_mgr.timers:
-                                        session.send_mgr.timers[loss_seq] = time.time() + session.send_mgr.rto
+                                    session.send_mgr.mark_retransmission_sent(loss_seq)
 
                             # Handle incoming piggybacked client data
                             tcp_header_len = ((tcp_packet[12] >> 4) & 0x0F) * 4
@@ -1045,18 +1032,18 @@ def run_conn_send(s: socket.socket, conn_info: conn_struct, payload: bytes) -> i
                             if len(incoming_data) > 0 and session.recv_mgr:
                                 session.recv_mgr.on_packet_arrived(pkt_seq, incoming_data)
                                 ack_seq_num = session.recv_mgr.get_next_ack()
-                                rwnd_bytes = session.recv_mgr.get_rwnd() * MSS
+                                rwnd_bytes = session.recv_mgr.get_advertised_rwnd()
                                 ack_pkt = build_tcp_packet(listen_ip, client_ip, listen_port, client_port,
                                                            seq=session.send_mgr.seq_to_send, ack_seq=ack_seq_num, ack=1, window=rwnd_bytes)
                                 ip_hdr = build_ip_header(listen_ip, client_ip, socket.IPPROTO_TCP, len(ack_pkt))
                                 s.sendto(ip_hdr + ack_pkt, (client_ip, 0))
 
                 # 4. Check for packet Timeouts
-                timed_out_pkts = session.send_mgr.check_timeouts()
+                timed_out_pkts = session.send_mgr.get_timed_out_packets()
                 if timed_out_pkts:
                     print(f"[Streap_raw] run_conn_send: {len(timed_out_pkts)} packets timed out, signaling CUBIC on_timeout")
                     session.cubic.on_timeout()
-                    rwnd_bytes = session.recv_mgr.get_rwnd() * MSS if session.recv_mgr else (RCV_WIN_SIZE * MSS)
+                    rwnd_bytes = session.recv_mgr.get_advertised_rwnd() if session.recv_mgr else (RCV_WIN_SIZE * MSS)
                     current_ack = session.recv_mgr.get_next_ack() if session.recv_mgr else session.client_seq
                     for to_seq, to_data in timed_out_pkts:
                         print(f"[Streap_raw] run_conn_send: Timeout Retransmit seq={to_seq} ({len(to_data)} bytes)")
@@ -1064,6 +1051,7 @@ def run_conn_send(s: socket.socket, conn_info: conn_struct, payload: bytes) -> i
                             s, listen_ip, client_ip, listen_port, client_port,
                             seq=to_seq, ack_seq=current_ack, payload=to_data, window=rwnd_bytes
                         )
+                        session.send_mgr.mark_retransmission_sent(to_seq)
 
             print(f"[Streap_raw] run_conn_send: Finished sending {len(payload)} bytes in {time.time() - start_time:.3f}s")
             return len(payload)
@@ -1086,8 +1074,9 @@ def close_connection(s: socket.socket, conn_info: conn_struct):
     with connections_lock:
         if client_key in connections:
             session = connections[client_key]
-            rwnd_bytes = session.recv_mgr.get_rwnd() * MSS if session.recv_mgr else (RCV_WIN_SIZE * MSS)
+            rwnd_bytes = session.recv_mgr.get_advertised_rwnd() if session.recv_mgr else (RCV_WIN_SIZE * MSS)
             ack_num = session.recv_mgr.get_next_ack() if session.recv_mgr else session.client_seq
+            # Send FIN packet
             fin_packet = build_tcp_packet(listen_ip, client_ip, listen_port, client_port,
                                           seq=session.server_seq, ack_seq=ack_num, ack=1, fin=1, window=rwnd_bytes)
             ip_header = build_ip_header(listen_ip, client_ip, socket.IPPROTO_TCP, len(fin_packet))

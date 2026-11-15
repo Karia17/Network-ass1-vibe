@@ -6,6 +6,9 @@ Module: streaprous_socket.constants
 Tập tin định nghĩa các hằng số tiêu chuẩn cho toàn bộ Tầng Giao vận (Transport Layer)
 bao gồm các phân hệ: Truyền tin cậy (Selective Repeat ARQ), Kiểm soát luồng (Flow Control),
 và Kiểm soát nghẽn (CUBIC RFC 8312).
+
+Mọi module (cubic.py, flow_buffer.py, streaprous_raw_connection.py) đều tham chiếu
+các hằng số từ tệp này để đảm bảo tính đồng bộ và tránh magic numbers.
 """
 
 # ==============================================================================

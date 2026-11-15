@@ -17,6 +17,8 @@ daemon.request
 This module provides a Request object to manage and persist 
 request settings (cookies, auth, proxies).
 """
+import json as jsonlib
+from urllib.parse import urlencode
 from .dictionary import CaseInsensitiveDict
 
 class Request():
@@ -71,6 +73,8 @@ class Request():
         self.routes = {}
         #: Hook point for routed mapped-path
         self.hook = None
+        self.version = None
+        self.query = ''
 
     def extract_request_line(self, request):
         try:
@@ -81,18 +85,18 @@ class Request():
             if path == '/':
                 path = '/index.html'
         except Exception:
-            return None, None
+            return None, None, None
 
         return method, path, version
              
     def prepare_headers(self, request):
         """Prepares the given HTTP headers."""
         lines = request.split('\r\n')
-        headers = {}
+        headers = CaseInsensitiveDict()
         for line in lines[1:]:
             if ': ' in line:
                 key, val = line.split(': ', 1)
-                headers[key.lower()] = val
+                headers[key.strip()] = val.strip()
         return headers
 
     def fetch_headers_body(self, request):
@@ -110,9 +114,22 @@ class Request():
         # Prepare the request line from the request header
         print("[Request] prepare request missg {}".format(request))
         self.method, self.path, self.version = self.extract_request_line(request)
+        if self.path and '?' in self.path:
+            self.path, _, self.query = self.path.partition('?')
+        else:
+            self.query = ''
         print("[Request] {} path {} version {}".format(self.method, self.path, self.version))
 
-        # Parse headers and body
+        #
+        # TODO:  Parse headers and body 
+        # with self.fetch_headers_body(request)
+        # and self.prepare_headers(self._raw_headers)
+        #
+
+        # self._raw_headers = ... 
+        # self._raw_body =...
+        # self.headers = ...
+        
         self._raw_headers, self._raw_body = self.fetch_headers_body(request)
         self.headers = self.prepare_headers(self._raw_headers)
         self.body = self._raw_body
@@ -122,29 +139,55 @@ class Request():
         # @bksysnet Preapring the webapp hook with StreapRous instance
         # The default behaviour with HTTP server is empty routed
         #
-        if routes:
+        # TODO manage the webapp hook in this mounting point
+        #
+        
+        if routes is not None and not routes == {}:
             self.routes = routes
             print("[Request] Routing METHOD {} path {}".format(self.method, self.path))
             self.hook = routes.get((self.method, self.path))
             print("[Request] Hook has request {}".format(request))
+            #
+            # self.hook manipulation goes here
+            # ...
+            #
 
-        # Parse Cookie header into dictionary
-        cookies_header = self.headers.get('cookie', '')
-        if cookies_header:
-            cookie_dict = {}
-            for item in cookies_header.split(';'):
+        cookies = self.headers.get('cookie', '')
+        #
+        #  TODO: implement the cookie function here
+        #        by parsing the header            #
+        #
+        self.cookies = {}
+        if cookies:
+            for item in cookies.split(';'):
                 if '=' in item:
                     k, v = item.strip().split('=', 1)
-                    cookie_dict[k] = v
-            self.cookies = cookie_dict
-        else:
-            self.cookies = {}
+                    self.cookies[k] = v
 
         return
 
     def prepare_body(self, data, files, json=None):
-        self.prepare_content_length(self.body)
+        body = None
+        if json is not None:
+            body = jsonlib.dumps(json).encode("utf-8")
+            if self.headers is None:
+                self.headers = CaseInsensitiveDict()
+            self.headers["Content-Type"] = "application/json"
+        elif data:
+            if isinstance(data, dict):
+                body = urlencode(data).encode("utf-8")
+                if self.headers is None:
+                    self.headers = CaseInsensitiveDict()
+                self.headers["Content-Type"] = "application/x-www-form-urlencoded"
+            elif isinstance(data, str):
+                body = data.encode("utf-8")
+            else:
+                body = data
+        elif files:
+            pass
+
         self.body = body
+        self.prepare_content_length(self.body)
         #
         # TODO prepare the request authentication
         #
@@ -153,7 +196,16 @@ class Request():
 
 
     def prepare_content_length(self, body):
-        self.headers["Content-Length"] = "0"
+        if self.headers is None:
+            self.headers = CaseInsensitiveDict()
+        if body is None:
+            self.headers["Content-Length"] = "0"
+        elif isinstance(body, str):
+            self.headers["Content-Length"] = str(len(body.encode('utf-8')))
+        elif isinstance(body, (bytes, bytearray)):
+            self.headers["Content-Length"] = str(len(body))
+        else:
+            self.headers["Content-Length"] = str(len(str(body)))
         #
         # TODO prepare the request authentication
         #

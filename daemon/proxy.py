@@ -194,7 +194,11 @@ def run_proxy(ip, port, routes):
         print("[Proxy] Listening on IP {} port {}".format(ip,port))
         while True:
             conn, addr = proxy.accept()
-            # Handle incoming client connection in a separate thread
+            #
+            #  TODO: implement the step of the client incomping connection
+            #        using multi-thread programming with the
+            #        provided handle_client routine
+            #
             client_thread = threading.Thread(
                 target=handle_client,
                 args=(conn, addr, routes),

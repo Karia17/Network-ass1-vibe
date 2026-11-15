@@ -164,17 +164,13 @@ class Response():
             elif sub_type == 'html':
                 base_dir = BASE_DIR+"www/"
             else:
-                handle_text_other(sub_type)
+                base_dir = BASE_DIR+"static/"
         elif main_type == 'image':
             base_dir = BASE_DIR+"static/"
             self.headers['Content-Type']='image/{}'.format(sub_type)
         elif main_type == 'application':
-            if sub_type in ['javascript', 'x-javascript']:
-                base_dir = BASE_DIR+"static/js/"
-                self.headers['Content-Type']='application/javascript'
-            else:
-                base_dir = BASE_DIR+"apps/"
-                self.headers['Content-Type']='application/{}'.format(sub_type)
+            base_dir = BASE_DIR+"apps/"
+            self.headers['Content-Type']='application/{}'.format(sub_type)
         #
         #  TODO: process other mime_type
         #        application/xml       
@@ -187,6 +183,9 @@ class Response():
         #        video/mpeg
         #        ...
         #
+        elif main_type == 'video':
+            base_dir = BASE_DIR+"static/"
+            self.headers['Content-Type']='video/{}'.format(sub_type)
         else:
             raise ValueError("Invalid MEME type: main_type={} sub_type={}".format(main_type,sub_type))
 
@@ -202,14 +201,12 @@ class Response():
 
         :rtype tuple: (int, bytes) representing content length and content data.
         """
-
         rel_path = path.lstrip('/')
-        if base_dir.endswith('static/') and rel_path.startswith('static/'):
-            rel_path = rel_path[len('static/'):]
-        elif base_dir.endswith('www/') and rel_path.startswith('www/'):
-            rel_path = rel_path[len('www/'):]
-        elif base_dir.endswith('apps/') and rel_path.startswith('apps/'):
-            rel_path = rel_path[len('apps/'):]
+        for prefix in ('static/', 'www/', 'apps/'):
+            base_norm = base_dir.replace('\\', '/').rstrip('/')
+            if base_norm.endswith(prefix.rstrip('/')) and rel_path.startswith(prefix):
+                rel_path = rel_path[len(prefix):]
+                break
 
         filepath = os.path.join(base_dir, rel_path)
 
@@ -289,7 +286,21 @@ class Response():
 
         :rtype bytes: complete HTTP response using prepared headers and content.
         """
+        if not request or not request.path:
+            return self.build_notfound()
+
         print("[Response] Start build response with req {}".format(request))
+        if envelop_content is not None:
+            import json
+            if isinstance(envelop_content, bytes):
+                content = envelop_content
+            elif isinstance(envelop_content, str):
+                content = envelop_content.encode("utf-8")
+            else:
+                content = json.dumps(envelop_content).encode("utf-8")
+            self.headers["Content-Type"] = "application/json"
+            self._content = content
+            return self.build_response_header(request) + content
 
         path = request.path
 
@@ -301,15 +312,23 @@ class Response():
         #If HTML, parse and serve embedded objects
         if path.endswith('.html') or mime_type == 'text/html':
             base_dir = self.prepare_content_type(mime_type = 'text/html')
-        elif mime_type == 'text/css' or path.endswith('.css'):
+        elif mime_type == 'text/css':
             base_dir = self.prepare_content_type(mime_type = 'text/css')
         elif mime_type == 'application/json' or mime_type == 'application/octet-stream':
             base_dir = self.prepare_content_type(mime_type = 'application/json')
             envelop_content = ""
+
+        #
+        # TODO: add support objects
+        #
         elif mime_type.startswith('image/'):
-            base_dir = self.prepare_content_type(mime_type = mime_type)
-        elif mime_type in ['application/javascript', 'application/x-javascript'] or path.endswith('.js'):
-            base_dir = self.prepare_content_type(mime_type = 'application/javascript')
+            base_dir = self.prepare_content_type(mime_type=mime_type)
+        elif mime_type.startswith('video/'):
+            base_dir = self.prepare_content_type(mime_type=mime_type)
+        elif mime_type.startswith('text/'):
+            base_dir = self.prepare_content_type(mime_type=mime_type)
+        elif mime_type.startswith('application/'):
+            base_dir = self.prepare_content_type(mime_type=mime_type)
         else:
             return self.build_notfound()
 
