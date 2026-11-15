@@ -254,10 +254,13 @@ class ReceiveBufferManager:
             init_s = arg1
             cap = capacity if capacity is not None else (win_size * mss if win_size else constants.RCV_WIN_SIZE * mss)
 
-        if cap <= 0 or init_s < 0:
+        if (type(cap) is not int or not 0 < cap < 2**31
+                or type(init_s) is not int or not 0 <= init_s < 2**32
+                or mss <= 0):
             raise ValueError("Invalid buffer capacity or initial_seq")
 
         self.lock = threading.RLock()
+        self.recv_lock = threading.Lock()
         self.capacity = cap
         self.mss = mss
         self.read_seq = init_s
@@ -285,6 +288,11 @@ class ReceiveBufferManager:
     def get_ack(self):
         with self.lock:
             return self.rcv_nxt % (2**32)
+
+    def get_ack_window(self):
+        """Return a consistent wire ACK/window snapshot."""
+        with self.lock:
+            return self.get_ack(), self.get_advertised_rwnd()
 
     def get_next_ack(self):
         return self.get_ack()

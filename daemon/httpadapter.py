@@ -182,12 +182,26 @@ class HttpAdapter:
         print("[HttpAdapter] Invoke handle_client_raw for {}:{}".format(conn_info.client_ip, conn_info.client_port))
 
         # Receive data using streaprous raw connection
-        data = run_conn_recv(raw_socket, conn_info)
+        data = b""
+        while True:
+            chunk = run_conn_recv(raw_socket, conn_info)
+            if not chunk:
+                close_connection(raw_socket, conn_info)
+                return
+            data += chunk
+            if b"\r\n\r\n" not in data:
+                continue
+            headers, body = data.split(b"\r\n\r\n", 1)
+            content_length = 0
+            for line in headers.split(b"\r\n")[1:]:
+                name, separator, value = line.partition(b":")
+                if separator and name.strip().lower() == b"content-length":
+                    content_length = int(value.strip())
+                    if content_length < 0:
+                        raise ValueError("negative Content-Length")
+            if len(body) >= content_length:
+                break
         
-        if not data:
-            print("[HttpAdapter] No data received or connection closed")
-            return
-
         # Prepare request
         msg = data.decode("utf-8")
         req.prepare(msg, routes)
