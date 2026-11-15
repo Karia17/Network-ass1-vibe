@@ -98,11 +98,8 @@ class SendBufferManager:
         seq = self._pending[0]
         size = len(self.send_buffer[seq]["payload"])
 
-        cwnd_bytes = cwnd * self.MSS if cwnd < 500 else cwnd
-        rwnd_bytes = self.rwnd * self.MSS if self.rwnd <= self.N * 2 else self.rwnd
-
-        return (self.InFlight + size <= rwnd_bytes and
-                self.InFlight + size <= cwnd_bytes)
+        return (self.InFlight + size <= self.rwnd and
+                self.InFlight + size <= cwnd)
 
     def get_next_packet_to_send(self, now=None):
         if not self._pending:
