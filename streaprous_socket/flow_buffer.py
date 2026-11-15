@@ -98,8 +98,8 @@ class SendBufferManager:
         seq = self._pending[0]
         size = len(self.send_buffer[seq]["payload"])
 
-        cwnd_bytes = cwnd * self.MSS if cwnd < 500 else cwnd
-        rwnd_bytes = self.rwnd * self.MSS if self.rwnd <= self.N * 2 else self.rwnd
+        cwnd_bytes = cwnd
+        rwnd_bytes = self.rwnd
 
         return (self.InFlight + size <= rwnd_bytes and
                 self.InFlight + size <= cwnd_bytes)
